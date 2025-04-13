@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 from pydantic import BaseModel
 from supabase import create_client, Client
-from typing import Optional
+from typing import Optional, Dict, Any, List, Union
 import openai
 import uuid
+import json
 
 # Load environment variables
 load_dotenv()
@@ -20,7 +21,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 app = FastAPI(
     title="Resume GPT API",
     description="API for generating tailored resumes based on job descriptions using OpenAI and Supabase.",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 # Configure CORS
@@ -54,6 +55,48 @@ class SampleDataResponse(BaseModel):
     message: str
     user_id: str
     job_id: int
+
+class GenericResponse(BaseModel):
+    message: str
+    data: Optional[Any] = None
+
+class QueryParams(BaseModel):
+    table: str
+    select: str = "*"
+    filters: Optional[Dict[str, Any]] = None
+    limit: Optional[int] = None
+    order: Optional[Dict[str, str]] = None
+
+class InsertDataRequest(BaseModel):
+    table: str
+    data: Union[Dict[str, Any], List[Dict[str, Any]]]
+
+class UpdateDataRequest(BaseModel):
+    table: str
+    data: Dict[str, Any]
+    match_column: str
+    match_value: Any
+
+class DeleteDataRequest(BaseModel):
+    table: str
+    match_column: str
+    match_value: Any
+
+class ExecuteRawSQLRequest(BaseModel):
+    query: str
+    params: Optional[Dict[str, Any]] = None
+
+class CreateTableRequest(BaseModel):
+    table_name: str
+    columns: Dict[str, str]
+    primary_key: Optional[str] = None
+
+class ResumeUploadRequest(BaseModel):
+    user_id: Optional[str] = None
+    content: str
+
+class JobDescriptionUploadRequest(BaseModel):
+    description: str
 
 @app.get("/")
 async def root():
@@ -250,6 +293,236 @@ async def tailor_resume(request: TailorResumeRequest):
             tailored_resume=tailored_resume
         )
         
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# New Database Gateway Endpoints for ChatGPT
+
+@app.get("/tables", response_model=GenericResponse)
+async def list_tables():
+    """
+    Lists all tables in the Supabase database.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        # This requires a raw SQL query since Supabase doesn't have a direct method to list tables
+        result = supabase.rpc('get_tables').execute()
+        
+        return GenericResponse(
+            message="Tables retrieved successfully",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/schema", response_model=GenericResponse)
+async def get_schema():
+    """
+    Gets the database schema information including tables and their columns.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        result = supabase.rpc('get_schema_info').execute()
+        
+        return GenericResponse(
+            message="Schema information retrieved successfully",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/query", response_model=GenericResponse)
+async def query_data(params: QueryParams):
+    """
+    Queries data from a specified table with optional filters.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        query = supabase.table(params.table).select(params.select)
+        
+        # Apply filters if provided
+        if params.filters:
+            for column, value in params.filters.items():
+                query = query.eq(column, value)
+        
+        # Apply order if provided
+        if params.order:
+            for column, direction in params.order.items():
+                if direction.lower() == "asc":
+                    query = query.order(column)
+                else:
+                    query = query.order(column, desc=True)
+        
+        # Apply limit if provided
+        if params.limit:
+            query = query.limit(params.limit)
+        
+        result = query.execute()
+        
+        return GenericResponse(
+            message=f"Data retrieved from {params.table}",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/insert", response_model=GenericResponse)
+async def insert_data(request: InsertDataRequest):
+    """
+    Inserts data into a specified table.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        result = supabase.table(request.table).insert(request.data).execute()
+        
+        return GenericResponse(
+            message=f"Data inserted into {request.table}",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update", response_model=GenericResponse)
+async def update_data(request: UpdateDataRequest):
+    """
+    Updates data in a specified table based on a matching column value.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        result = supabase.table(request.table).update(request.data).eq(request.match_column, request.match_value).execute()
+        
+        return GenericResponse(
+            message=f"Data updated in {request.table}",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/delete", response_model=GenericResponse)
+async def delete_data(request: DeleteDataRequest):
+    """
+    Deletes data from a specified table based on a matching column value.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        result = supabase.table(request.table).delete().eq(request.match_column, request.match_value).execute()
+        
+        return GenericResponse(
+            message=f"Data deleted from {request.table}",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/execute-sql", response_model=GenericResponse)
+async def execute_raw_sql(request: ExecuteRawSQLRequest):
+    """
+    Executes a raw SQL query with optional parameters.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        # SECURITY WARNING: This endpoint could be dangerous if exposed publicly
+        result = supabase.rpc('run_sql_query', {"sql_query": request.query, "params": request.params or {}}).execute()
+        
+        return GenericResponse(
+            message="SQL query executed successfully",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/create-table", response_model=GenericResponse)
+async def create_table(request: CreateTableRequest):
+    """
+    Creates a new table with the specified columns.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        # Build the CREATE TABLE SQL statement
+        columns_sql = []
+        for col_name, col_type in request.columns.items():
+            columns_sql.append(f"{col_name} {col_type}")
+        
+        if request.primary_key:
+            columns_sql.append(f"PRIMARY KEY ({request.primary_key})")
+        
+        columns_str = ", ".join(columns_sql)
+        
+        create_table_sql = f"CREATE TABLE {request.table_name} ({columns_str});"
+        
+        # Execute the SQL
+        result = supabase.rpc('run_sql_query', {"sql_query": create_table_sql}).execute()
+        
+        return GenericResponse(
+            message=f"Table {request.table_name} created successfully",
+            data=result.data
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload-resume", response_model=GenericResponse)
+async def upload_resume(request: ResumeUploadRequest):
+    """
+    Uploads a resume to the database.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        # Generate user_id if not provided
+        user_id = request.user_id or str(uuid.uuid4())
+        
+        # Insert resume
+        resume_data = {
+            "user_id": user_id,
+            "content": request.content
+        }
+        
+        result = supabase.table("resumes").insert(resume_data).execute()
+        
+        return GenericResponse(
+            message="Resume uploaded successfully",
+            data={"user_id": user_id, "resume_id": result.data[0]["id"] if result.data else None}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload-job-description", response_model=GenericResponse)
+async def upload_job_description(request: JobDescriptionUploadRequest):
+    """
+    Uploads a job description to the database.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
+    try:
+        # Insert job description
+        job_data = {
+            "description": request.description
+        }
+        
+        result = supabase.table("job_descriptions").insert(job_data).execute()
+        
+        return GenericResponse(
+            message="Job description uploaded successfully",
+            data={"job_id": result.data[0]["id"] if result.data else None}
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
