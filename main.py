@@ -8,17 +8,24 @@ from typing import Optional
 import openai
 import uuid
 
-# Load environment variables from .env.local file
+# Load environment variables
 load_dotenv()
 
+# Get environment variables with fallbacks
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Validate required environment variables
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Missing required environment variables: SUPABASE_URL and SUPABASE_KEY must be set")
+
 # Initialize Supabase client
-supabase: Client = create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_KEY")
-)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Initialize OpenAI client
-openai.api_key = os.getenv("OPENAI_API_KEY")
+if OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
 
 app = FastAPI(
     title="Resume GPT API",
