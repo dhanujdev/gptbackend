@@ -1,0 +1,523 @@
+openapi: 3.1.0
+info:
+  title: Resume GPT API
+  description: >
+    API for generating tailored resumes based on job descriptions using OpenAI and Supabase.
+    Includes endpoints to insert sample data, generate tailored resumes, and provides a comprehensive
+    database gateway for ChatGPT to interact with Supabase. Allows complete database management,
+    data manipulation, and schema exploration capabilities.
+  version: 1.2.0
+servers:
+  - url: https://gptbackend-8zkr.onrender.com
+    description: Production Render server
+paths:
+  /:
+    get:
+      operationId: root
+      summary: API welcome endpoint
+      description: Simple welcome endpoint to verify the API is running
+      responses:
+        "200":
+          description: Welcome message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Welcome to Resume GPT API
+  /insert-sample-data:
+    post:
+      operationId: insertSampleData
+      summary: Insert sample resume and job data for testing
+      description: >
+        Inserts a randomly generated user with a sample resume and job description into the database. Returns the
+        `user_id` and `job_id` to use for testing the resume tailoring endpoint.
+      responses:
+        "200":
+          description: Successfully inserted sample data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Sample data inserted successfully
+                  user_id:
+                    type: string
+                    format: uuid
+                  job_id:
+                    type: integer
+        "500":
+          description: Failed to insert sample data due to a server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+                    example: Supabase client not initialized. Check environment variables.
+  /tailor-resume:
+    post:
+      operationId: tailorResume
+      summary: Generate a tailored resume for a user and job
+      description: >
+        Tailors a user's base resume to a specific job description using GPT. You must provide a valid `user_id` and
+        `job_id` that exist in the Supabase database. The tailored resume will be stored in the `tailored_resumes` table
+        with references to the original resume and job.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+                - job_id
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                  description: ID of the user whose resume will be tailored
+                job_id:
+                  type: integer
+                  description: ID of the job description to tailor to
+      responses:
+        "200":
+          description: Successfully generated a tailored resume
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                    format: uuid
+                  job_id:
+                    type: integer
+                  tailored_resume:
+                    type: string
+                    description: The generated tailored resume content
+        "400":
+          description: Invalid user or job ID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+                    example: User not found
+        "500":
+          description: Server error or issue with OpenAI API
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+                    oneOf:
+                      - example: Supabase client not initialized. Check environment variables.
+                      - example: OpenAI API key not configured. Check environment variables.
+                      - example: Error generating tailored resume
+  
+  # Database Gateway Endpoints
+  /tables:
+    get:
+      operationId: listTables
+      summary: List all tables in the database
+      description: Retrieves a list of all tables in the Supabase database
+      responses:
+        "200":
+          description: Successfully retrieved tables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /schema:
+    get:
+      operationId: getSchema
+      summary: Get database schema information
+      description: Retrieves detailed schema information including tables and their columns
+      responses:
+        "200":
+          description: Successfully retrieved schema information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /query:
+    post:
+      operationId: queryData
+      summary: Query data from a specified table
+      description: Allows querying data from any table with filters, ordering, and pagination
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryParams'
+      responses:
+        "200":
+          description: Successfully retrieved data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /insert:
+    post:
+      operationId: insertData
+      summary: Insert data into a specified table
+      description: Allows inserting one or multiple rows into any table
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InsertDataRequest'
+      responses:
+        "200":
+          description: Successfully inserted data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /update:
+    post:
+      operationId: updateData
+      summary: Update data in a specified table
+      description: Updates data in a table based on a matching column value
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDataRequest'
+      responses:
+        "200":
+          description: Successfully updated data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /delete:
+    post:
+      operationId: deleteData
+      summary: Delete data from a specified table
+      description: Deletes data from a table based on a matching column value
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteDataRequest'
+      responses:
+        "200":
+          description: Successfully deleted data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /execute-sql:
+    post:
+      operationId: executeRawSQL
+      summary: Execute a raw SQL query
+      description: Executes a custom SQL query with security safeguards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteRawSQLRequest'
+      responses:
+        "200":
+          description: Successfully executed SQL query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /create-table:
+    post:
+      operationId: createTable
+      summary: Create a new table in the database
+      description: Creates a new table with specified columns and data types
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTableRequest'
+      responses:
+        "200":
+          description: Successfully created table
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /upload-resume:
+    post:
+      operationId: uploadResume
+      summary: Upload a resume to the database
+      description: Uploads a resume and generates a user_id if not provided
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeUploadRequest'
+      responses:
+        "200":
+          description: Successfully uploaded resume
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /upload-job-description:
+    post:
+      operationId: uploadJobDescription
+      summary: Upload a job description to the database
+      description: Uploads a job description and returns the generated job_id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobDescriptionUploadRequest'
+      responses:
+        "200":
+          description: Successfully uploaded job description
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: Error message
+
+    GenericResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Operation completed successfully
+        data:
+          type: object
+          nullable: true
+          description: Response data that varies based on the endpoint
+
+    QueryParams:
+      type: object
+      required:
+        - table
+      properties:
+        table:
+          type: string
+          description: The table to query
+        select:
+          type: string
+          default: "*"
+          description: Columns to select, comma-separated
+        filters:
+          type: object
+          additionalProperties: true
+          description: Key-value pairs for filtering records
+        limit:
+          type: integer
+          description: Maximum number of records to return
+        order:
+          type: object
+          additionalProperties: 
+            type: string
+            enum: [asc, desc]
+          description: Ordering configuration with column name and direction
+
+    InsertDataRequest:
+      type: object
+      required:
+        - table
+        - data
+      properties:
+        table:
+          type: string
+          description: The table to insert data into
+        data:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+          description: Data to insert, either a single record object or array of record objects
+
+    UpdateDataRequest:
+      type: object
+      required:
+        - table
+        - data
+        - match_column
+        - match_value
+      properties:
+        table:
+          type: string
+          description: The table to update
+        data:
+          type: object
+          additionalProperties: true
+          description: Data to update with new values
+        match_column:
+          type: string
+          description: Column to match for updating
+        match_value:
+          description: Value to match in the specified column
+
+    DeleteDataRequest:
+      type: object
+      required:
+        - table
+        - match_column
+        - match_value
+      properties:
+        table:
+          type: string
+          description: The table to delete from
+        match_column:
+          type: string
+          description: Column to match for deletion
+        match_value:
+          description: Value to match in the specified column
+
+    ExecuteRawSQLRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: SQL query to execute
+        params:
+          type: object
+          additionalProperties: true
+          description: Optional parameters for the query
+          nullable: true
+
+    CreateTableRequest:
+      type: object
+      required:
+        - table_name
+        - columns
+      properties:
+        table_name:
+          type: string
+          description: Name of the table to create
+        columns:
+          type: object
+          additionalProperties:
+            type: string
+          description: Column definitions with name as key and SQL type as value
+        primary_key:
+          type: string
+          description: Name of the primary key column
+          nullable: true
+
+    ResumeUploadRequest:
+      type: object
+      required:
+        - content
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Optional user ID (will be generated if not provided)
+          nullable: true
+        content:
+          type: string
+          description: Resume content
+
+    JobDescriptionUploadRequest:
+      type: object
+      required:
+        - description
+      properties:
+        description:
+          type: string
+          description: Job description content 
