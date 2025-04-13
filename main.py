@@ -20,7 +20,11 @@ supabase: Client = create_client(
 # Initialize OpenAI client
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-app = FastAPI(title="Resume GPT API")
+app = FastAPI(
+    title="Resume GPT API",
+    description="API for generating tailored resumes based on job descriptions using OpenAI and Supabase.",
+    version="1.1.0"
+)
 
 # Configure CORS
 app.add_middleware(
@@ -49,8 +53,32 @@ class SampleDataResponse(BaseModel):
 async def root():
     return {"message": "Welcome to Resume GPT API"}
 
-@app.post("/insert-sample-data", response_model=SampleDataResponse)
+@app.post(
+    "/insert-sample-data",
+    response_model=SampleDataResponse,
+    responses={
+        200: {
+            "description": "Successfully inserted sample data",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "message": "Sample data inserted successfully",
+                        "user_id": "123e4567-e89b-12d3-a456-426614174000",
+                        "job_id": 1
+                    }
+                }
+            }
+        },
+        500: {
+            "description": "Failed to insert sample data due to a server error"
+        }
+    }
+)
 async def insert_sample_data():
+    """
+    Inserts a randomly generated user with a sample resume and job description into the database.
+    Returns the `user_id` and `job_id` to use for testing the resume tailoring endpoint.
+    """
     try:
         # Generate a sample user_id
         user_id = str(uuid.uuid4())
@@ -122,8 +150,35 @@ async def insert_sample_data():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/tailor-resume", response_model=TailorResumeResponse)
+@app.post(
+    "/tailor-resume",
+    response_model=TailorResumeResponse,
+    responses={
+        200: {
+            "description": "Successfully generated a tailored resume",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "user_id": "123e4567-e89b-12d3-a456-426614174000",
+                        "job_id": 1,
+                        "tailored_resume": "Tailored resume content..."
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Invalid user or job ID"
+        },
+        500: {
+            "description": "Server error or issue with OpenAI API"
+        }
+    }
+)
 async def tailor_resume(request: TailorResumeRequest):
+    """
+    Tailors a user's base resume to a specific job description using GPT.
+    You must provide a valid `user_id` and `job_id` that exist in the Supabase database.
+    """
     try:
         # Fetch base resume from Supabase
         resume_response = supabase.table("resumes").select("*").eq("user_id", request.user_id).execute()
