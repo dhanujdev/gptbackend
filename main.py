@@ -16,17 +16,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Validate required environment variables
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Missing required environment variables: SUPABASE_URL and SUPABASE_KEY must be set")
-
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# Initialize OpenAI client
-if OPENAI_API_KEY:
-    openai.api_key = OPENAI_API_KEY
-
+# Initialize FastAPI app first
 app = FastAPI(
     title="Resume GPT API",
     description="API for generating tailored resumes based on job descriptions using OpenAI and Supabase.",
@@ -41,6 +31,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize Supabase client only if credentials are available
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Initialize OpenAI client if API key is available
+if OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
 
 class TailorResumeRequest(BaseModel):
     user_id: str
@@ -86,6 +85,9 @@ async def insert_sample_data():
     Inserts a randomly generated user with a sample resume and job description into the database.
     Returns the `user_id` and `job_id` to use for testing the resume tailoring endpoint.
     """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    
     try:
         # Generate a sample user_id
         user_id = str(uuid.uuid4())
@@ -185,14 +187,22 @@ async def tailor_resume(request: TailorResumeRequest):
     """
     Tailors a user's base resume to a specific job description using GPT.
     You must provide a valid `user_id` and `job_id` that exist in the Supabase database.
+    The tailored resume will be stored in the tailored_resumes table.
     """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase client not initialized. Check environment variables.")
+    if not openai.api_key:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured. Check environment variables.")
+    
     try:
         # Fetch base resume from Supabase
         resume_response = supabase.table("resumes").select("*").eq("user_id", request.user_id).execute()
         if not resume_response.data:
             raise HTTPException(status_code=400, detail="User not found")
         
-        base_resume = resume_response.data[0]["content"]
+        base_resume = resume_response.data[0]
+        base_resume_id = base_resume["id"]
+        base_resume_content = base_resume["content"]
         
         # Fetch job description from Supabase
         job_response = supabase.table("job_descriptions").select("*").eq("id", request.job_id).execute()
@@ -206,7 +216,7 @@ async def tailor_resume(request: TailorResumeRequest):
         Please tailor the following resume to match the job description.
         
         Base Resume:
-        {base_resume}
+        {base_resume_content}
         
         Job Description:
         {job_description}
@@ -223,6 +233,16 @@ async def tailor_resume(request: TailorResumeRequest):
         )
         
         tailored_resume = response.choices[0].message.content
+        
+        # Store the tailored resume in Supabase
+        tailored_resume_data = {
+            "user_id": request.user_id,
+            "job_id": request.job_id,
+            "base_resume_id": base_resume_id,
+            "content": tailored_resume
+        }
+        
+        supabase.table("tailored_resumes").insert(tailored_resume_data).execute()
         
         return TailorResumeResponse(
             user_id=request.user_id,
